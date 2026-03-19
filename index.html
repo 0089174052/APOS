@@ -387,44 +387,52 @@
 
     function generatePOS() {
       const centsOptions = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95];
+      const notes = [5, 10, 20, 50, 100];
+      const cleanCents = [0, 0.10, 0.20, 0.50]; // minimal-coin change targets
       const dollars = randInt(2, 89);
       const cents = pick(centsOptions);
       const owed = round5c(dollars + cents / 100);
 
-      // Payment strategy
+      // Payment strategy — coin-offloading is the dominant scenario
       const r = Math.random();
       let paid;
-      if (r < 0.30) {
-        // Next note up
-        const notes = [5, 10, 20, 50, 100];
+      if (r < 0.50) {
+        // Coin offload — customer adds coins so change comes back clean
+        // Pick a note (or note combo) above owed, then add coins to land on clean change
+        const noteUp = notes.find(n => n >= owed) || 100;
+        // Target: change = whole dollars, or whole dollars + minimal coins (.10, .20, .50)
+        const baseChange = noteUp - owed;
+        const targetCleanChange = Math.floor(baseChange) + pick(cleanCents);
+        // Customer might overshoot to a rounder number — e.g. pay more to get $5, $10, $15 back
+        const roundTargets = [5, 10, 15, 20, 25, 30];
+        const biggerClean = roundTargets.find(t => t > baseChange && (owed + t) <= 100);
+        // 40% aim for exact round dollar change from the note, 60% aim for a bigger round target
+        if (biggerClean && Math.random() < 0.60) {
+          paid = round5c(owed + biggerClean);
+        } else {
+          paid = round5c(owed + targetCleanChange);
+        }
+        if (paid > 100) paid = round5c(owed + Math.floor(baseChange));
+        if (paid < owed) paid = noteUp;
+      } else if (r < 0.70) {
+        // Next note up — no coins, customer just hands a note
         paid = notes.find(n => n >= owed) || 100;
-      } else if (r < 0.50) {
-        // Big note
+      } else if (r < 0.85) {
+        // Big note + coins — pays $50/$100 but adds coins for cleaner change
+        const bigNote = owed <= 50 ? pick([50, 100]) : 100;
+        const rawChange = bigNote - owed;
+        const targetChange = Math.floor(rawChange) + pick(cleanCents);
+        paid = round5c(owed + targetChange);
+        if (paid > 100) paid = bigNote;
+        if (paid < owed) paid = bigNote;
+      } else if (r < 0.95) {
+        // Big note — no coins, just $50 or $100
         if (owed <= 50) paid = pick([50, 100]);
         else paid = 100;
-      } else if (r < 0.70) {
-        // Offload coins — pay note + owed cents for round change
-        const notes = [5, 10, 20, 50, 100];
-        const noteUp = notes.find(n => n >= owed) || 100;
-        const owedCents = owed % 1;
-        paid = round5c(noteUp + owedCents);
-        if (paid > 100) paid = 100;
-        if (paid < owed) paid = round5c(owed + randInt(1, 10));
-      } else if (r < 0.85) {
-        // Target round change ($5 or $10 back)
-        const target = pick([5, 10]);
-        paid = round5c(owed + target);
-        if (paid > 100) paid = 100;
-      } else if (r < 0.95) {
-        // Weird amount
-        paid = round5c(owed + randInt(1, 30) + pick(centsOptions) / 100);
-        if (paid > 100) paid = 100;
       } else {
         // Exact change
         paid = owed;
       }
-
-      if (paid < owed) paid = round5c(owed + randInt(1, 10));
 
       const change = round5c(paid - owed);
 
@@ -436,9 +444,19 @@
         isPOS: true,
       };
 
-      // Curveball — ~20% chance
+      // Curveball — ~20% chance: customer adds coins mid-transaction to clean up change
       if (Math.random() < 0.20 && change > 0) {
-        const extra = pick([1, 2, 0.5]);
+        // Customer realises they have coins — adds enough to round up the change
+        const changeCents = round5c(change % 1);
+        let extra;
+        if (changeCents > 0) {
+          // Add coins to round change up to next whole dollar or .50
+          extra = round5c(1 - changeCents);
+          if (extra < 0.05) extra = pick([0.50, 1, 2]);
+        } else {
+          // Change is already round — add a whole dollar or two
+          extra = pick([1, 2, 5]);
+        }
         const newPaid = round5c(paid + extra);
         if (newPaid <= 100) {
           const newChange = round5c(newPaid - owed);
