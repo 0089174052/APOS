@@ -30,7 +30,8 @@
     /* MENU SCREEN                            */
     /* ═══════════════════════════════════════ */
     #screen-menu {
-      justify-content: center; align-items: center; gap: 20px; padding: 40px 24px;
+      align-items: center; gap: 20px; padding: 40px 24px;
+      overflow-y: auto;
     }
     .menu-title { font-size: 48px; font-weight: 800; color: #fff; letter-spacing: 4px; }
     .menu-subtitle { font-size: 14px; color: #888; margin-bottom: 24px; text-align: center; }
@@ -210,6 +211,36 @@
       font-size: 14px; color: #888; text-transform: uppercase;
       letter-spacing: 1px; margin-bottom: 8px;
     }
+
+    /* ═══════════════════════════════════════ */
+    /* MENU ERRORS                            */
+    /* ═══════════════════════════════════════ */
+    .menu-errors { width: 100%; max-width: 340px; }
+    .menu-errors-title {
+      font-size: 14px; color: #888; text-transform: uppercase;
+      letter-spacing: 1px; margin-bottom: 8px;
+    }
+    .errors-filter {
+      display: flex; gap: 0; margin-bottom: 12px;
+      background: #16213e; border-radius: 8px; overflow: hidden;
+    }
+    .errors-filter-btn {
+      flex: 1; padding: 8px 4px; border: none; background: transparent;
+      color: #666; font-size: 12px; font-weight: 600; cursor: pointer;
+      touch-action: manipulation;
+    }
+    .errors-filter-btn.active { background: #1a3a6e; color: #fff; }
+    .menu-error-list {
+      display: flex; flex-direction: column; gap: 6px;
+      max-height: 300px; overflow-y: auto;
+    }
+    .errors-copy-btn {
+      width: 100%; margin-top: 8px; padding: 10px;
+      background: transparent; border: 1px solid #333;
+      color: #888; font-size: 13px; font-weight: 600; border-radius: 8px;
+      cursor: pointer; touch-action: manipulation;
+    }
+    .errors-copy-btn:active { background: #16213e; }
   </style>
 </head>
 <body>
@@ -242,6 +273,7 @@
       </div>
     </div>
     <button class="menu-btn btn-stats" onclick="showScreen('stats')">VIEW STATS</button>
+    <div class="menu-errors" id="menu-errors"></div>
   </div>
 
   <!-- ═══════════════════════════════════════ -->
@@ -334,6 +366,7 @@
       document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
       document.getElementById('screen-' + name).classList.add('active');
       if (name === 'stats') renderStats();
+      if (name === 'menu') renderMenuErrors();
     }
 
     // ═══════════════════════════════════════
@@ -711,6 +744,7 @@
       stats.sessions.push({
         date: new Date().toISOString(),
         mode: state.mode,
+        timerDuration: state.timerDuration,
         total: state.session.total,
         correct: state.session.correct,
         accuracy,
@@ -763,6 +797,111 @@
 
       container.innerHTML = modeStats(arith, 'Arithmetic') + '<div style="height:24px;"></div>' + modeStats(pos, 'POS Change');
     }
+
+    // ═══════════════════════════════════════
+    // MENU ERRORS
+    // ═══════════════════════════════════════
+    let errorFilter = 'last';
+
+    function getFilteredSessions() {
+      const stats = loadStats();
+      const withErrors = stats.sessions.filter(s => s.errors && s.errors.length > 0);
+      if (errorFilter === 'last') return withErrors.slice(-1);
+      if (errorFilter === 'last10') return withErrors.slice(-10);
+      return withErrors;
+    }
+
+    function renderMenuErrors() {
+      const container = document.getElementById('menu-errors');
+      const sessions = getFilteredSessions();
+
+      if (sessions.length === 0 && errorFilter === 'last') {
+        // Check if there are any errors at all before hiding completely
+        const stats = loadStats();
+        const anyErrors = stats.sessions.some(s => s.errors && s.errors.length > 0);
+        if (!anyErrors) { container.innerHTML = ''; return; }
+      }
+
+      const errors = [];
+      sessions.forEach(s => {
+        s.errors.forEach(e => {
+          errors.push({
+            problem: e.problem,
+            yourAnswer: e.yourAnswer,
+            correctAnswer: e.correctAnswer,
+            mode: s.mode,
+            timer: s.timerDuration || '?',
+          });
+        });
+      });
+
+      const filterLabels = { last: 'Last Session', last10: 'Last 10', all: 'All Time' };
+
+      container.innerHTML = `
+        <div class="menu-errors-title">Errors (${errors.length})</div>
+        <div class="errors-filter">
+          ${['last', 'last10', 'all'].map(f =>
+            `<button class="errors-filter-btn ${errorFilter === f ? 'active' : ''}" onclick="setErrorFilter('${f}')">${filterLabels[f]}</button>`
+          ).join('')}
+        </div>
+        ${errors.length > 0 ? `
+          <div class="menu-error-list">
+            ${errors.map(e => `
+              <div class="error-item">
+                <div>
+                  <span class="error-problem">${e.problem}</span>
+                  <div style="font-size:11px;color:#555;margin-top:2px;">${e.mode === 'pos' ? 'POS' : 'Arith'} · ${e.timer}s</div>
+                </div>
+                <div class="error-detail">
+                  <div class="error-yours">${e.yourAnswer}</div>
+                  <div class="error-correct">→ ${e.mode === 'pos' ? '$' : ''}${e.correctAnswer}</div>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+          <button class="errors-copy-btn" onclick="copyErrors()">COPY ERRORS</button>
+        ` : '<div style="color:#666;font-size:13px;">No errors in this range.</div>'}
+      `;
+    }
+
+    function setErrorFilter(f) {
+      errorFilter = f;
+      renderMenuErrors();
+    }
+
+    function copyErrors() {
+      const sessions = getFilteredSessions();
+      const filterLabels = { last: 'Last Session', last10: 'Last 10 Sessions', all: 'All Time' };
+
+      // Group by mode + timer
+      const groups = {};
+      sessions.forEach(s => {
+        const timer = s.timerDuration || '?';
+        const key = `${s.mode}|${timer}`;
+        if (!groups[key]) groups[key] = { mode: s.mode, timer, errors: [] };
+        s.errors.forEach(e => groups[key].errors.push(e));
+      });
+
+      let text = `APOS Errors (${filterLabels[errorFilter]})\n\n`;
+      Object.values(groups).forEach(g => {
+        const label = g.mode === 'pos' ? 'POS Change' : 'Arithmetic';
+        text += `${label} (${g.timer}s timer):\n`;
+        g.errors.forEach(e => {
+          const prefix = g.mode === 'pos' ? '$' : '';
+          text += `- ${e.problem} → You: ${e.yourAnswer} → Correct: ${prefix}${e.correctAnswer}\n`;
+        });
+        text += '\n';
+      });
+
+      navigator.clipboard.writeText(text.trim()).then(() => {
+        const btn = document.querySelector('.errors-copy-btn');
+        btn.textContent = 'COPIED';
+        setTimeout(() => { btn.textContent = 'COPY ERRORS'; }, 1500);
+      });
+    }
+
+    // Render errors on initial load
+    renderMenuErrors();
   </script>
 </body>
 </html>
